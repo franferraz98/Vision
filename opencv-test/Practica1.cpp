@@ -9,46 +9,54 @@
 using namespace cv;
 using namespace std;
 
-void colorReduce(cv::Mat& img, int div = 128) {
-    for (int i = 0; i < img.rows; i++) {
-        uchar* data = img.ptr<uchar>(i); // puntero a la fila i
-        for (int j = 0; j < img.cols * img.channels(); j++) {
-            data[j] = data[j] / div * div + div / 2;
-            // o si te gusta mas, puedes hacerlo:
-            // *data++= *data/div*div + div/2;
+void menu() {
+    cout << "|--------------------------------------------------------|" << endl;
+    cout << "|                        EFECTOS                         |" << endl;
+    cout << "|--------------------------------------------------------|" << endl;
+    cout << "| 1.- Blanco y negro                                     |" << endl;
+    cout << "| 2.- Mejorar el contraste.                              |" << endl;
+    cout << "| 3.- Ecualizar histograma.                              |" << endl;
+    cout << "| 4.- Alien.                                             |" << endl;
+    cout << "| 5.- Poster.                                            |" << endl;
+    cout << "| 6.- Barril.                                            |" << endl;
+    cout << "| 7.- Cojin                                              |" << endl;
+    cout << "|--------------------------------------------------------|" << endl << endl;
+}
+
+void colorReduce(cv::Mat& frame, int divisor = 128) {
+    for (int i = 0; i < frame.rows; i++) {
+        uchar* data = frame.ptr<uchar>(i);
+        for (int j = 0; j < frame.cols * frame.channels(); j++) {
+            data[j] = data[j] / divisor * divisor + divisor / 2;
         }
     }
 }
 
 
 void alien(const Mat& in, Mat& out) {
-    Mat hsv, bgra, hsvo, bgrao, mask;
+    Mat hsv, bgra, hsvo, bgrao, mask1, mask2, colorFilter;
+    colorFilter.create(in.size(), CV_32FC1);
     cv::cvtColor(in, hsv, COLOR_BGR2HSV);
     cv::cvtColor(in, bgra, COLOR_BGR2BGRA);
     inRange(hsv, Scalar(0, 0.23 * 255, 0), Scalar(50, 0.68 * 255, 255), hsvo);
     inRange(bgra, Scalar(20, 40, 95, 15), Scalar(255, 255, 255, 255), bgrao);
-    bitwise_and(hsvo, bgrao, mask);
-    in.copyTo(out);
-    add(out, Scalar(0,70,0), out, mask);
-}
-
-Mat metodoDistorsion(Mat srcFrame, int k1) {
-
-    Mat map_x, map_y, output;
-    double Cy = (double)srcFrame.cols / 2;
-    double Cx = (double)srcFrame.rows / 2;
-    map_x.create(srcFrame.size(), CV_32FC1);
-    map_y.create(srcFrame.size(), CV_32FC1);
-
-    for (int x = 0; x < map_x.rows; x++) {
-        for (int y = 0; y < map_y.cols; y++) {
-            double r2 = (x - Cx) * (x - Cx) + (y - Cy) * (y - Cy);
-            map_x.at<float>(x, y) = (double)((y - Cy) / (1 + double(k1 / 1000000.0) * r2) + Cy); // se suma para obtener la posicion absoluta
-            map_y.at<float>(x, y) = (double)((x - Cx) / (1 + double(k1 / 1000000.0) * r2) + Cx); // la posicion relativa del punto al centro
+    
+    /*for (int i = 0; i < bgra.rows; i++) {
+        for (int j = 0; j < bgra.cols; j++) {
+            uchar* data = bgra.ptr<uchar>(i,j);
+            if (data[2] > data[1] && data[2] > data[0]  && fabs(data[2] - data[1]) < 15.0) {
+                colorFilter.at<float>(i, j) = 255.0;
+            }
+            else {
+                colorFilter.at<float>(i, j) = 0.0;
+            }
         }
     }
-    remap(srcFrame, output, map_x, map_y, INTER_LINEAR);
-    return output;
+    */
+    // imshow("ColorFilter", colorFilter);
+    bitwise_and(hsvo, bgrao, mask1);
+    in.copyTo(out);
+    add(out, Scalar(0,70,0), out, mask1);
 }
 
 void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
@@ -65,8 +73,8 @@ void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
             double inorm = (2.0*i - frame.rows) / frame.rows;
             double jnorm = (2.0*j - frame.cols) / frame.cols;
             double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
-            float xd = inorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
-            float yd = jnorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
+            float xd = inorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
             m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0; 
             m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
         }
@@ -75,11 +83,42 @@ void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
     remap(frame, out, m2, m1, INTER_LINEAR);
 }
 
-float k1_ = 0.0;
+void pincushionDistortion(const Mat& frame, Mat& out, double k1, double k2) {
+    double centrox = frame.rows / 2.0;
+    double centroy = frame.cols / 2.0;
 
-static void on_trackbar(int slider, void*)
+    Mat m1, m2;
+
+    m1.create(frame.size(), CV_32FC1);
+    m2.create(frame.size(), CV_32FC1);
+
+    for (int i = 0; i < frame.rows; i++) {
+        for (int j = 0; j < frame.cols; j++) {
+            double inorm = (2.0 * i - frame.rows) / frame.rows;
+            double jnorm = (2.0 * j - frame.cols) / frame.cols;
+            double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
+            float xd = inorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
+            m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0;
+            m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
+        }
+    }
+
+    remap(frame, out, m2, m1, INTER_LINEAR);
+}
+
+
+static float k1_ = 0.0;
+static float k2_ = 0.0;
+
+static void on_trackbar1(int slider, void*)
 {
     k1_ = (slider - 50.0) / 100.0;
+}
+
+static void on_trackbar2(int slider, void*)
+{
+    k2_ = (slider - 50.0) / 100.0;
 }
 
 int main(int, char**)
@@ -102,13 +141,22 @@ int main(int, char**)
         return -1;
     }
     //--- GRAB AND WRITE LOOP
+    menu();
+    char ef;
+    cin >> ef;
+    cout << "Seleccionado: " << ef << endl;
+    effect = ef - '0';
     cout << "Start grabbing" << endl
         << "Press any key to terminate" << endl;
-    namedWindow("Test Distorsion", WINDOW_AUTOSIZE);
     int k1_slider = 1;
-
-    createTrackbar("Distortion", "Test Distorsion", &k1_slider, 100.0, on_trackbar);
-    on_trackbar(k1_slider, 0);
+    int k2_slider = 1;
+    if (effect == 6 || effect == 7) {
+        namedWindow("Test Distorsion", WINDOW_AUTOSIZE);
+        createTrackbar("K1", "Test Distorsion", &k1_slider, 100.0, on_trackbar1);
+        createTrackbar("K2", "Test Distorsion", &k2_slider, 100.0, on_trackbar2);
+        on_trackbar1(k1_slider, 0);
+        on_trackbar2(k2_slider, 0);
+    }
     for (;;)
     {
         // wait for a new frame from camera and store it into 'frame'
@@ -126,7 +174,7 @@ int main(int, char**)
             case 2: //Contraste
                 cv::cvtColor(frame, frameMod, COLOR_BGR2Lab);
                 split(frameMod, channels);
-                channels[0].convertTo(channels[0], -1, 1.5, 30);
+                channels[0].convertTo(channels[0], -1, 1.5, 10);
                 merge(channels, frameMod);
                 cv::cvtColor(frameMod, frameMod, COLOR_Lab2BGR);
                 break;
@@ -134,6 +182,7 @@ int main(int, char**)
                 cv::cvtColor(frame, frameMod, COLOR_BGR2HSV);
                 split(frameMod, channels);
                 equalizeHist(channels[1], channels[1]);
+                
                 merge(channels, frameMod);
                 cv::cvtColor(frameMod, frameMod, COLOR_HSV2BGR);
                 break;
@@ -145,11 +194,10 @@ int main(int, char**)
                 colorReduce(frameMod);
                 break;
             case 6: //Barril
-                
-                barrelDistortion(frame, frameMod, k1_, 0.2);
-
+                barrelDistortion(frame, frameMod, k1_, k2_);
                 break;
             case 7: //Cojín
+                pincushionDistortion(frame, frameMod, k1_, k2_);
                 break;
             default:
                 frameMod = frame;
@@ -159,6 +207,7 @@ int main(int, char**)
         if (waitKey(5) >= 0)
             break;
     }
+    cout << frame.size() << endl;
     // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
 }
