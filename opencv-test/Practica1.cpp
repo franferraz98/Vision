@@ -35,7 +35,7 @@ Mat plotHistograms(const Mat& img, String window_name, bool accumulate){
 	  {
 
 		if(accumulate){
-			float norm = (hist_2.at<float>(i) / (img.rows * img.cols)) * 5000;
+			float norm = (hist_2.at<float>(i) / (img.rows * img.cols)) * 20000;
 	      line( histImage, Point( bin_w*(i-1), hist_h - cvRound(sum) ) ,
 	                       Point( bin_w*(i), hist_h - cvRound(sum + norm) ),
 	                       Scalar( 255, 0, 0), 2, 8, 0  );
@@ -47,7 +47,7 @@ Mat plotHistograms(const Mat& img, String window_name, bool accumulate){
 		}
 
 	  }
-	namedWindow(window_name, CV_WINDOW_AUTOSIZE );
+	namedWindow(window_name, WINDOW_AUTOSIZE );
 	imshow(window_name, histImage );
 	return histImage;
 }
@@ -86,22 +86,18 @@ void menu() {
     cout << "| 3.- Ecualizar histograma.                              |" << endl;
     cout << "| 4.- Alien.                                             |" << endl;
     cout << "| 5.- Poster.                                            |" << endl;
-    cout << "| 6.- Barril.                                            |" << endl;
-    cout << "| 7.- Cojin                                              |" << endl;
+    cout << "| 6.- Distorsion.                                        |" << endl;
+    cout << "| 7.- Pixelar.                                           |" << endl;
+    cout << "| 8.- Fusion.                                            |" << endl;
     cout << "|--------------------------------------------------------|" << endl << endl;
 }
 
 void alien(const Mat& in, Mat& out, Scalar alien) {
-    Mat hsv, bgra, hsvo, bgrao, mask;
-    cv::cvtColor(in, hsv, COLOR_BGR2HSV);
-    cv::cvtColor(in, bgra, COLOR_BGR2BGRA);
-    inRange(hsv, Scalar(0, 0.23 * 255, 0), Scalar(50, 0.68 * 255, 255), hsvo);
-    inRange(bgra, Scalar(20, 40, 95, 15), Scalar(255, 255, 255, 255), bgrao);
-
-    // imshow("ColorFilter", colorFilter);
-    bitwise_and(hsvo, bgrao, mask);
+    Mat ycrcb, ycrcbo;
+    cv::cvtColor(in, ycrcb, COLOR_BGR2YCrCb);
+    inRange(ycrcb, Scalar(0, 133, 77), Scalar(235, 173, 127), ycrcbo);
     in.copyTo(out);
-    add(out, alien, out, mask);
+    add(out, alien, out, ycrcbo);
 }
 
 
@@ -144,7 +140,7 @@ void pixelar(const Mat& in, Mat& out, int size){
 			}
 
 	        Scalar color = mean(Mat(in, rect));
-	        rectangle(out, rect, color, CV_FILLED);
+	        rectangle(out, rect, color, FILLED);
 	    }
 	}
 }
@@ -157,8 +153,7 @@ void fusion(const Mat& in, const Mat& in2, Mat& out){
 		for(int j = 0; j < in.cols; j++){
 			float disX = abs(i - centroX) / centroX;
 			float disY = abs(j - centroY) / centroY;
-			float alpha = sqrt((pow(disX, 2.0) + pow(disY, 2.0)));
-			alpha = alpha / distMax;
+			float alpha = sqrt((pow(disX, 2.0) + pow(disY, 2.0))) / distMax;
 			out.at<Vec3b>(i,j) = (1.0 - alpha) * in.at<Vec3b>(i,j) + alpha * in2.at<Vec3b>(i,j);
 		}
 	}
@@ -167,17 +162,15 @@ void fusion(const Mat& in, const Mat& in2, Mat& out){
 static void valorK1(int slider, void*)
 {
     k1_ = (slider - 50.0) / 100.0;
-    cout << "Valor k1: " << k1_ << endl;
 }
 
 static void valorK2(int slider, void*)
 {
     k2_ = (slider - 50.0) / 100.0;
-    cout << "Valor k2: " << k2_ << endl;
 }
 
 static void numColores(int slider, void*){
-	colors = slider;
+	colors = slider + 1;
 }
 
 static void sizePixelado(int slider, void*){
@@ -187,13 +180,13 @@ static void sizePixelado(int slider, void*){
 static void coloresAlien(int slider, void*){
 	switch(slider){
 	case 0:
-		Alien = Scalar(70,0,0);
+		Alien = Scalar(0,0,70);
 		break;
 	case 1:
-		Alien = Scalar(0,70,0);
+        Alien = Scalar(70,0,0);
 		break;
 	case 2:
-		Alien = Scalar(0,0,70);
+		Alien = Scalar(0,70,0);
 		break;
 	}
 }
@@ -278,11 +271,12 @@ int main(int, char**)
 
         int key = waitKey(5);
         if ((key - 48) > 0 && (key - 48) < 9) {
-        	int k1_slider = 1, k2_slider = 1, colores = 1, size = 1, colorAlien = 1;
+        	int k1_slider = 1, k2_slider = 1, colores = 44, size = 1, colorAlien = 1;
         	effect = (key - 48);
-        	if(last_slider != ""){
+        	/* if(last_slider != ""){
         		destroyWindow(last_slider);
-        	}
+        	}*/
+            destroyAllWindows();
         	switch(effect){
         		case 1:
         			last_slider = "";
@@ -296,7 +290,7 @@ int main(int, char**)
         		case 4: //Alien
         			last_slider = "Aliens";
         			namedWindow(last_slider, WINDOW_AUTOSIZE);
-					createTrackbar("Color del alien", last_slider, &colorAlien, 3, coloresAlien);
+					createTrackbar("Color del alien", last_slider, &colorAlien, 2, coloresAlien);
 					coloresAlien(colorAlien, 0);
         			break;
         		case 5: //Poster
@@ -331,7 +325,7 @@ int main(int, char**)
             break;
         }
     }
-    cout << frame.size() << endl;
+    // cout << frame.size() << endl;
     // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
 }
