@@ -4,24 +4,80 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
 #include <algorithm>
+#include <stdlib.h>
 #include <iostream>
 #include <stdio.h>
+
 using namespace cv;
 using namespace std;
 
-void colorReduce(cv::Mat& img, int div = 128) {
+float k1_ = 0.0, k2_ = 0.0;
+int colors = 128;
+int size_ = 1;
+Scalar colorAlien(70,0,0);
+
+Mat plotHistograms(const Mat& img, String window_name, bool accumulate){
+	vector<Mat> planes;
+	split( img, planes );
+	int histSize = 256;
+	float range[] = { 0, 256 }; //the upper boundary is exclusive
+	const float* histRange = { range };
+	bool uniform = true;
+	Mat hist_2;
+	calcHist( &planes[2], 1, 0, Mat(), hist_2, 1, &histSize, &histRange, uniform, false );
+
+	normalize(hist_2, hist_2, 0, img.rows, NORM_MINMAX, -1, Mat() );
+ 	int hist_w = 512; int hist_h = 400;
+    int bin_w = cvRound( (double) hist_w/histSize );
+    Mat histImage(hist_h, hist_w, CV_8UC3, Scalar(0,0,0));
+    float sum = 0;
+	for( int i = 1; i < histSize; i++ )
+	  {
+
+		if(accumulate){
+			float norm = (hist_2.at<float>(i) / (img.rows * img.cols)) * 5000;
+	      line( histImage, Point( bin_w*(i-1), hist_h - cvRound(sum) ) ,
+	                       Point( bin_w*(i), hist_h - cvRound(sum + norm) ),
+	                       Scalar( 255, 0, 0), 2, 8, 0  );
+	      sum += norm;
+		} else {
+			line( histImage, Point( bin_w*(i-1), hist_h - cvRound(hist_2.at<float>(i-1)) ) ,
+				                       Point( bin_w*(i), hist_h - cvRound(hist_2.at<float>(i)) ),
+				                       Scalar( 255, 0, 0), 2, 8, 0  );
+		}
+
+	  }
+	namedWindow(window_name, CV_WINDOW_AUTOSIZE );
+	imshow(window_name, histImage );
+	return histImage;
+}
+
+void equalizeHistogram(const Mat& frame, Mat& frameMod){
+	vector<Mat> channels(3);
+	cv::cvtColor(frame, frameMod, COLOR_BGR2HSV);
+	Mat histEqAcumOrig = plotHistograms(frameMod, "Histograma acumulado original" , true);
+	split(frameMod, channels);
+	equalizeHist(channels[2], channels[2]);
+	merge(channels, frameMod);
+	Mat histEq = plotHistograms(frameMod, "Histograma", false);
+
+	Mat histEqAcum = plotHistograms(frameMod, "Histograma acumulado" , true);
+
+	cv::cvtColor(frameMod, frameMod, COLOR_HSV2BGR);
+}
+
+
+void poster(Mat& img, int div) {
     for (int i = 0; i < img.rows; i++) {
         uchar* data = img.ptr<uchar>(i); // puntero a la fila i
         for (int j = 0; j < img.cols * img.channels(); j++) {
             data[j] = data[j] / div * div + div / 2;
-            // o si te gusta mas, puedes hacerlo:
-            // *data++= *data/div*div + div/2;
         }
     }
 }
 
 
-void alien(const Mat& in, Mat& out) {
+void alien(const Mat& in, Mat& out, Scalar alien) {
     Mat hsv, bgra, hsvo, bgrao, mask;
     cv::cvtColor(in, hsv, COLOR_BGR2HSV);
     cv::cvtColor(in, bgra, COLOR_BGR2BGRA);
@@ -29,34 +85,12 @@ void alien(const Mat& in, Mat& out) {
     inRange(bgra, Scalar(20, 40, 95, 15), Scalar(255, 255, 255, 255), bgrao);
     bitwise_and(hsvo, bgrao, mask);
     in.copyTo(out);
-    add(out, Scalar(0,70,0), out, mask);
+    add(out, alien, out, mask);
 }
 
-Mat metodoDistorsion(Mat srcFrame, int k1) {
 
-    Mat map_x, map_y, output;
-    double Cy = (double)srcFrame.cols / 2;
-    double Cx = (double)srcFrame.rows / 2;
-    map_x.create(srcFrame.size(), CV_32FC1);
-    map_y.create(srcFrame.size(), CV_32FC1);
-
-    for (int x = 0; x < map_x.rows; x++) {
-        for (int y = 0; y < map_y.cols; y++) {
-            double r2 = (x - Cx) * (x - Cx) + (y - Cy) * (y - Cy);
-            map_x.at<float>(x, y) = (double)((y - Cy) / (1 + double(k1 / 1000000.0) * r2) + Cy); // se suma para obtener la posicion absoluta
-            map_y.at<float>(x, y) = (double)((x - Cx) / (1 + double(k1 / 1000000.0) * r2) + Cx); // la posicion relativa del punto al centro
-        }
-    }
-    remap(srcFrame, output, map_x, map_y, INTER_LINEAR);
-    return output;
-}
-
-void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
-    double centrox = frame.rows / 2.0;
-    double centroy = frame.cols / 2.0;
-    
+void distortion(const Mat& frame, Mat& out, double k1, double k2) {
     Mat m1, m2;
-
     m1.create(frame.size(), CV_32FC1);
     m2.create(frame.size(), CV_32FC1);
 
@@ -65,51 +99,112 @@ void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
             double inorm = (2.0*i - frame.rows) / frame.rows;
             double jnorm = (2.0*j - frame.cols) / frame.cols;
             double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
-            float xd = inorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
-            float yd = jnorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
-            m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0; 
+            float xd = inorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
+            m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0;
             m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
         }
     }
-    
+
     remap(frame, out, m2, m1, INTER_LINEAR);
 }
 
-float k1_ = 0.0;
+void pixelar(const Mat& in, Mat& out, int size){
+	for (int r = 0; r < in.rows; r += size)
+	{
+	    for (int c = 0; c < in.cols; c += size)
+	    {
+	    	Rect rect;
+	        rect.x = c;
+	        rect.y = r;
+	        rect.width = size;
+	        if(c + size > in.cols){
+	        	rect.width = in.cols - c;
+	        }
 
-static void on_trackbar(int slider, void*)
+	        rect.height = size;
+	        if(r + size > in.rows){
+				rect.height = in.rows - r;
+			}
+
+	        Scalar color = mean(Mat(in, rect));
+	        rectangle(out, rect, color, CV_FILLED);
+	    }
+	}
+}
+
+void fusion(const Mat& in, const Mat& in2, Mat& out){
+	float centroX = in.rows / 2;
+	float centroY = in.cols / 2;
+	float distMax = sqrt((pow(1.0, 2.0) + pow(1.0, 2.0)));
+	for(int i = 0; i < in.rows; i++){
+		for(int j = 0; j < in.cols; j++){
+			float disX = abs(i - centroX) / centroX;
+			float disY = abs(j - centroY) / centroY;
+			float alpha = sqrt((pow(disX, 2.0) + pow(disY, 2.0)));
+			alpha = alpha / distMax;
+			out.at<Vec3b>(i,j) = (1.0 - alpha) * in.at<Vec3b>(i,j) + alpha * in2.at<Vec3b>(i,j);
+		}
+	}
+}
+
+static void valorK1(int slider, void*)
 {
     k1_ = (slider - 50.0) / 100.0;
+    cout << "Valor k1: " << k1_ << endl;
+}
+
+static void valorK2(int slider, void*)
+{
+    k2_ = (slider - 50.0) / 100.0;
+    cout << "Valor k2: " << k2_ << endl;
+}
+
+static void numColores(int slider, void*){
+	colors = slider;
+}
+
+static void sizePixelado(int slider, void*){
+	size_ = slider + 1;
+}
+
+static void coloresAlien(int slider, void*){
+	switch(slider){
+	case 0:
+		colorAlien = Scalar(70,0,0);
+		break;
+	case 1:
+		colorAlien = Scalar(0,70,0);
+		break;
+	case 2:
+		colorAlien = Scalar(0,0,70);
+		break;
+	}
 }
 
 int main(int, char**)
 {
     int effect = 6;
-    Mat frame, frameMod;
+    Mat frame, frameMod, img, img2;
     vector<Mat> channels(3);
+    String last_slider = "";
     //--- INITIALIZE VIDEOCAPTURE
     VideoCapture cap;
     // open the default camera using default API
-    // cap.open(0);
-    // OR advance usage: select any API backend
+
     int deviceID = 0;             // 0 = open default camera
     int apiID = cv::CAP_ANY;      // 0 = autodetect default API
     // open selected camera using selected API
     cap.open(deviceID + apiID);
+
     // check if we succeeded
     if (!cap.isOpened()) {
         cerr << "ERROR! Unable to open camera\n";
         return -1;
     }
-    //--- GRAB AND WRITE LOOP
-    cout << "Start grabbing" << endl
-        << "Press any key to terminate" << endl;
-    namedWindow("Test Distorsion", WINDOW_AUTOSIZE);
-    int k1_slider = 1;
 
-    createTrackbar("Distortion", "Test Distorsion", &k1_slider, 100.0, on_trackbar);
-    on_trackbar(k1_slider, 0);
-    for (;;)
+    Mat hist;
+    while(true)
     {
         // wait for a new frame from camera and store it into 'frame'
         cap.read(frame);
@@ -118,46 +213,100 @@ int main(int, char**)
             cerr << "ERROR! blank frame grabbed\n";
             break;
         }
-        // show live and wait for a key with timeout long enough to show images
+
         switch (effect) {
             case 1: //Blanco y negro
-                cv::cvtColor(frame, frameMod, COLOR_BGR2GRAY);
+                cvtColor(frame, frameMod, COLOR_BGR2GRAY);
                 break;
             case 2: //Contraste
-                cv::cvtColor(frame, frameMod, COLOR_BGR2Lab);
+                cvtColor(frame, frameMod, COLOR_BGR2HSV);
                 split(frameMod, channels);
-                channels[0].convertTo(channels[0], -1, 1.5, 30);
+                //alpha = 1.6 beta = 30
+                channels[2].convertTo(channels[2], -1, 1.6, 30);
                 merge(channels, frameMod);
-                cv::cvtColor(frameMod, frameMod, COLOR_Lab2BGR);
+                cvtColor(frameMod, frameMod, COLOR_HSV2BGR);
                 break;
             case 3: //Ecualizar histograma
-                cv::cvtColor(frame, frameMod, COLOR_BGR2HSV);
-                split(frameMod, channels);
-                equalizeHist(channels[1], channels[1]);
-                merge(channels, frameMod);
-                cv::cvtColor(frameMod, frameMod, COLOR_HSV2BGR);
+                equalizeHistogram(frame,frameMod);
+                //plot histogram
                 break;
             case 4: //Alien
                 alien(frame, frameMod);
                 break;
             case 5: //Poster
                 frame.copyTo(frameMod);
-                colorReduce(frameMod);
+                poster(frameMod, colors);
                 break;
-            case 6: //Barril
-                
-                barrelDistortion(frame, frameMod, k1_, 0.2);
-
+            case 6: //Distorsion
+                distortion(frame, frameMod, k1_, k2_);
                 break;
-            case 7: //Cojín
-                break;
+            case 7: // pixelar
+            	pixelar(frame, frameMod, size_);
+            	break;
+            case 8:
+            	fusion(frame, img2, frameMod);
+            	break;
             default:
                 frameMod = frame;
         }
+
         imshow("Mod", frameMod);
         imshow("Original", frame);
-        if (waitKey(5) >= 0)
+
+        int key = waitKey(5);
+        if ((key - 48) > 0 && (key - 48) < 9) {
+        	int k1_slider = 1, k2_slider = 1, colores = 1, size = 1;
+        	effect = (key - 48);
+        	if(last_slider != ""){
+        		destroyWindow(last_slider);
+        	}
+        	switch(effect){
+        		case 1:
+        			last_slider = "";
+        			break;
+        		case 2: //Contraste
+        			last_slider = "";
+        		    break;
+        		case 3: //Ecualizar histograma
+        			last_slider = "";
+        			break;
+        		case 4: //Alien
+        			last_slider = "Aliens";
+        			namedWindow(last_slider, WINDOW_AUTOSIZE);
+					createTrackbar("Color del alien", last_slider, &colorAlien, 3, coloresAlien);
+					coloresAlien(colorAlien, 0);
+        			break;
+        		case 5: //Poster
+        			last_slider = "Colores";
+					namedWindow(last_slider, WINDOW_AUTOSIZE);
+					createTrackbar("Numero de colores", last_slider, &colores, 128, numColores);
+					numColores(colores, 0);
+        			break;
+        		case 6: //Distorsion
+        			last_slider = "Test Distorsion";
+        			namedWindow(last_slider, WINDOW_AUTOSIZE);
+					createTrackbar("Distortion", last_slider, &k1_slider, 100.0, valorK1);
+					valorK1(k1_slider, 0);
+					createTrackbar("Distortion 2", last_slider, &k2_slider, 100.0, valorK2);
+					valorK2(k2_slider, 0);
+        			break;
+        		case 7:
+        			last_slider = "Pixelar";
+					namedWindow(last_slider, WINDOW_AUTOSIZE);
+					createTrackbar("Pixelado", last_slider, &size, 15, sizePixelado);
+					sizePixelado(colores, 0);
+					break;
+        			break;
+        		case 8:
+        			img = imread("sky.jpg", IMREAD_COLOR);
+        			resize(img, img2, Size(frame.cols, frame.rows));
+        			//img2 = Mat(frame.rows, frame.cols, frame.type(), Scalar(0,0,0));
+        			break;
+        	}
+        }
+        else if (key >= 0) {
             break;
+        }
     }
     // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
