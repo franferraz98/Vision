@@ -67,6 +67,7 @@ void equalizeHistogram(const Mat& frame, Mat& frameMod){
 }
 
 
+
 void poster(Mat& img, int div) {
     for (int i = 0; i < img.rows; i++) {
         uchar* data = img.ptr<uchar>(i); // puntero a la fila i
@@ -76,6 +77,19 @@ void poster(Mat& img, int div) {
     }
 }
 
+void menu() {
+    cout << "|--------------------------------------------------------|" << endl;
+    cout << "|                        EFECTOS                         |" << endl;
+    cout << "|--------------------------------------------------------|" << endl;
+    cout << "| 1.- Blanco y negro                                     |" << endl;
+    cout << "| 2.- Mejorar el contraste.                              |" << endl;
+    cout << "| 3.- Ecualizar histograma.                              |" << endl;
+    cout << "| 4.- Alien.                                             |" << endl;
+    cout << "| 5.- Poster.                                            |" << endl;
+    cout << "| 6.- Barril.                                            |" << endl;
+    cout << "| 7.- Cojin                                              |" << endl;
+    cout << "|--------------------------------------------------------|" << endl << endl;
+}
 
 void alien(const Mat& in, Mat& out, Scalar alien) {
     Mat hsv, bgra, hsvo, bgrao, mask;
@@ -83,14 +97,20 @@ void alien(const Mat& in, Mat& out, Scalar alien) {
     cv::cvtColor(in, bgra, COLOR_BGR2BGRA);
     inRange(hsv, Scalar(0, 0.23 * 255, 0), Scalar(50, 0.68 * 255, 255), hsvo);
     inRange(bgra, Scalar(20, 40, 95, 15), Scalar(255, 255, 255, 255), bgrao);
-    bitwise_and(hsvo, bgrao, mask);
+
+    // imshow("ColorFilter", colorFilter);
+    bitwise_and(hsvo, bgrao, mask1);
     in.copyTo(out);
     add(out, alien, out, mask);
 }
 
 
-void distortion(const Mat& frame, Mat& out, double k1, double k2) {
+void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
+    double centrox = frame.rows / 2.0;
+    double centroy = frame.cols / 2.0;
+    
     Mat m1, m2;
+
     m1.create(frame.size(), CV_32FC1);
     m2.create(frame.size(), CV_32FC1);
 
@@ -99,8 +119,31 @@ void distortion(const Mat& frame, Mat& out, double k1, double k2) {
             double inorm = (2.0*i - frame.rows) / frame.rows;
             double jnorm = (2.0*j - frame.cols) / frame.cols;
             double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
-            float xd = inorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
-            float yd = jnorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
+            float xd = inorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
+            m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0; 
+            m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
+        }
+    }
+    
+    remap(frame, out, m2, m1, INTER_LINEAR);
+}
+
+void pincushionDistortion(const Mat& frame, Mat& out, double k1, double k2) {
+    double centrox = frame.rows / 2.0;
+    double centroy = frame.cols / 2.0;
+
+    Mat m1, m2;
+    m1.create(frame.size(), CV_32FC1);
+    m2.create(frame.size(), CV_32FC1);
+
+    for (int i = 0; i < frame.rows; i++) {
+        for (int j = 0; j < frame.cols; j++) {
+            double inorm = (2.0 * i - frame.rows) / frame.rows;
+            double jnorm = (2.0 * j - frame.cols) / frame.cols;
+            double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
+            float xd = inorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
             m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0;
             m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
         }
@@ -182,6 +225,11 @@ static void coloresAlien(int slider, void*){
 	}
 }
 
+static void on_trackbar2(int slider, void*)
+{
+    k2_ = (slider - 50.0) / 100.0;
+}
+
 int main(int, char**)
 {
     int effect = 6;
@@ -203,7 +251,12 @@ int main(int, char**)
         return -1;
     }
 
-    Mat hist;
+    
+    //--- GRAB AND WRITE LOOP
+    menu();
+    cout << "Start grabbing" << endl
+        << "Press any key to terminate" << endl;
+    
     while(true)
     {
         // wait for a new frame from camera and store it into 'frame'
@@ -228,7 +281,6 @@ int main(int, char**)
                 break;
             case 3: //Ecualizar histograma
                 equalizeHistogram(frame,frameMod);
-                //plot histogram
                 break;
             case 4: //Alien
                 alien(frame, frameMod);
@@ -238,7 +290,9 @@ int main(int, char**)
                 poster(frameMod, colors);
                 break;
             case 6: //Distorsion
-                distortion(frame, frameMod, k1_, k2_);
+                //distortion(frame, frameMod, k1_, k2_);
+                //barrelDistortion(frame, frameMod, k1_, k2_);
+                pincushionDistortion(frame, frameMod, k1_, k2_);
                 break;
             case 7: // pixelar
             	pixelar(frame, frameMod, size_);
@@ -308,6 +362,7 @@ int main(int, char**)
             break;
         }
     }
+    cout << frame.size() << endl;
     // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
 }
