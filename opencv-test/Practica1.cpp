@@ -14,7 +14,7 @@ using namespace std;
 float k1_ = 0.0, k2_ = 0.0;
 int colors = 128;
 int size_ = 1;
-Scalar colorAlien(70,0,0);
+Scalar Alien(70,0,0);
 
 Mat plotHistograms(const Mat& img, String window_name, bool accumulate){
 	vector<Mat> planes;
@@ -99,40 +99,13 @@ void alien(const Mat& in, Mat& out, Scalar alien) {
     inRange(bgra, Scalar(20, 40, 95, 15), Scalar(255, 255, 255, 255), bgrao);
 
     // imshow("ColorFilter", colorFilter);
-    bitwise_and(hsvo, bgrao, mask1);
+    bitwise_and(hsvo, bgrao, mask);
     in.copyTo(out);
     add(out, alien, out, mask);
 }
 
 
-void barrelDistortion(const Mat& frame, Mat& out, double k1, double k2) {
-    double centrox = frame.rows / 2.0;
-    double centroy = frame.cols / 2.0;
-    
-    Mat m1, m2;
-
-    m1.create(frame.size(), CV_32FC1);
-    m2.create(frame.size(), CV_32FC1);
-
-    for (int i = 0; i < frame.rows; i++) {
-        for (int j = 0; j < frame.cols; j++) {
-            double inorm = (2.0*i - frame.rows) / frame.rows;
-            double jnorm = (2.0*j - frame.cols) / frame.cols;
-            double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
-            float xd = inorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
-            float yd = jnorm * (1.0 - k1 * ru * ru + k2 * pow(ru, 4.0));
-            m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0; 
-            m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
-        }
-    }
-    
-    remap(frame, out, m2, m1, INTER_LINEAR);
-}
-
-void pincushionDistortion(const Mat& frame, Mat& out, double k1, double k2) {
-    double centrox = frame.rows / 2.0;
-    double centroy = frame.cols / 2.0;
-
+void distortion(const Mat& frame, Mat& out, double k1, double k2) {
     Mat m1, m2;
     m1.create(frame.size(), CV_32FC1);
     m2.create(frame.size(), CV_32FC1);
@@ -142,8 +115,8 @@ void pincushionDistortion(const Mat& frame, Mat& out, double k1, double k2) {
             double inorm = (2.0 * i - frame.rows) / frame.rows;
             double jnorm = (2.0 * j - frame.cols) / frame.cols;
             double ru = sqrt(pow(inorm, 2.0) + pow(jnorm, 2.0));
-            float xd = inorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
-            float yd = jnorm * (1.0 + k1 * ru * ru - k2 * pow(ru, 4.0));
+            float xd = inorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
+            float yd = jnorm * (1.0 + k1 * ru * ru + k2 * pow(ru, 4.0));
             m1.at<float>(i, j) = (xd + 1.0) * frame.rows / 2.0;
             m2.at<float>(i, j) = (yd + 1.0) * frame.cols / 2.0;
         }
@@ -214,21 +187,17 @@ static void sizePixelado(int slider, void*){
 static void coloresAlien(int slider, void*){
 	switch(slider){
 	case 0:
-		colorAlien = Scalar(70,0,0);
+		Alien = Scalar(70,0,0);
 		break;
 	case 1:
-		colorAlien = Scalar(0,70,0);
+		Alien = Scalar(0,70,0);
 		break;
 	case 2:
-		colorAlien = Scalar(0,0,70);
+		Alien = Scalar(0,0,70);
 		break;
 	}
 }
 
-static void on_trackbar2(int slider, void*)
-{
-    k2_ = (slider - 50.0) / 100.0;
-}
 
 int main(int, char**)
 {
@@ -251,12 +220,12 @@ int main(int, char**)
         return -1;
     }
 
-    
+
     //--- GRAB AND WRITE LOOP
     menu();
     cout << "Start grabbing" << endl
         << "Press any key to terminate" << endl;
-    
+
     while(true)
     {
         // wait for a new frame from camera and store it into 'frame'
@@ -283,7 +252,7 @@ int main(int, char**)
                 equalizeHistogram(frame,frameMod);
                 break;
             case 4: //Alien
-                alien(frame, frameMod);
+                alien(frame, frameMod, Alien);
                 break;
             case 5: //Poster
                 frame.copyTo(frameMod);
@@ -292,7 +261,7 @@ int main(int, char**)
             case 6: //Distorsion
                 //distortion(frame, frameMod, k1_, k2_);
                 //barrelDistortion(frame, frameMod, k1_, k2_);
-                pincushionDistortion(frame, frameMod, k1_, k2_);
+                distortion(frame, frameMod, k1_, k2_);
                 break;
             case 7: // pixelar
             	pixelar(frame, frameMod, size_);
@@ -309,7 +278,7 @@ int main(int, char**)
 
         int key = waitKey(5);
         if ((key - 48) > 0 && (key - 48) < 9) {
-        	int k1_slider = 1, k2_slider = 1, colores = 1, size = 1;
+        	int k1_slider = 1, k2_slider = 1, colores = 1, size = 1, colorAlien = 1;
         	effect = (key - 48);
         	if(last_slider != ""){
         		destroyWindow(last_slider);
